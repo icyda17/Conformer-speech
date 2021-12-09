@@ -1,0 +1,22 @@
+version_0:
+  data:
+    train_file: datasets/train.json
+    test_list: ['datasets/test.json']
+    labels_path: datasets/kor_syllable.json
+    dataset_path: datasets
+    audio_dir: audio
+  device:
+    multi_gpu: False
+    device: cpu
+  audio:
+    sample_rate: 16000
+    num_mel: 80
+    window_size: 25
+    window_stride: 10
+  spec_augment:
+    freq_mask_para: 27
+    time_mask_num: 10
+    freq_mask_num: 2
+  seed_num: 777
+  batch_size: 32
+
