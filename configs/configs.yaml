@@ -1,10 +1,11 @@
 version_0:
   data:
-    train_file: datasets/train.json
-    test_list: ['datasets/test.json']
+    train: train
+    test: test
     labels_path: datasets/kor_syllable.json
-    dataset_path: datasets
+    dataset_path: datasets/data_sample
     audio_dir: audio
+    text_file: text
   device:
     multi_gpu: False
     device: cpu
@@ -14,9 +15,36 @@ version_0:
     window_size: 25
     window_stride: 10
   spec_augment:
+    apply_spec_augment: True
     freq_mask_para: 27
     time_mask_num: 10
     freq_mask_num: 2
+    apply_noise_augment: False
+    noise_dataset_dir: 
+    noise_sample_rate: 16000
+    noise_level: 0.7
+    apply_time_stretch_augment: False
+    time_stretch_min_rate: 0.7
+    time_stretch_max_rate: 1.4
   seed_num: 777
   batch_size: 32
+  num_workers: 8
+  model:
+    input_dim: 80
+    encoder_dim: 512
+    decoder_dim: 640
+    num_encoder_layers: 17
+    num_decoder_layers: 1
+    num_attention_heads: 8
+    feed_forward_expansion_factor: 4
+    conv_expansion_factor: 2
+    input_dropout_p: 0.1
+    feed_forward_dropout_p: 0.1
+    attention_dropout_p: 0.1
+    conv_dropout_p: 0.1
+    decoder_dropout_p: 0.1
+    conv_kernel_size: 31
+    half_step_residual: True
+    decoder_rnn_type: lstm
+    warm_steps: 10000
 

@@ -2,15 +2,11 @@ import os
 from torch.utils.data import Dataset
 import torchaudio
 from torch import Tensor
-import librosa
-from data.audio.augment import SpecAugment
-
-def load_audio(audio_path, sample_rate):
-    assert audio_path.endswith('wav') or audio_path.endswith(
-        'flac'), "only wav/flac files"
-    signal, sr = librosa.load(audio_path, sr=sample_rate)
-
-    return signal
+import numpy as np
+from data.audio.augment import SpecAugment, NoiseInjector, TimeStretchAugment
+from pathlib import Path
+from data.audio.audio_utils import load_audio
+import torch
 
 
 class FilterBankFeatureTransform():
@@ -39,11 +35,7 @@ class MelFilterBankDataset(Dataset):
     TIME_STRETCH = 3
     AUDIO_JOINING = 4
 
-    def __init__(self, conf, dataset_path, data_list, char2index, sos_id, eos_id, normalize=False, mode='train',
-                 apply_spec_augment: bool = False,
-                 apply_noise_augment: bool = False,
-                 apply_time_stretch_augment: bool = False
-                 ):
+    def __init__(self, conf, dataset_path, data_list, char2index, sos_id, eos_id, unk_id, normalize=False, mode='train'):
         """
         Dataset for audio & transcript matching
         :param audio_conf: Sample rate, window, window size length, stride
@@ -62,6 +54,7 @@ class MelFilterBankDataset(Dataset):
 
         super(MelFilterBankDataset, self).__init__()
         # dict{sample rate, window_size, window_stride}
+        self.mode = mode
         self.audio_conf = conf['audio']
         self.augment_conf = conf['spec_augment']
         self.data_list = data_list  # [{"wav": , "text": , "speaker_id": "}]
@@ -71,6 +64,7 @@ class MelFilterBankDataset(Dataset):
         self.char2index = char2index
         self.sos_id = sos_id  # 2001
         self.eos_id = eos_id  # 2002
+        self.unk_id = unk_id
         self.PAD = 0
         self.normalize = normalize  # Train: True
         self.augments = [self.NONE_AUGMENT] * len(self.audio_paths)
@@ -78,50 +72,80 @@ class MelFilterBankDataset(Dataset):
         self.transforms = FilterBankFeatureTransform(
             self.audio_conf["num_mel"], self.audio_conf["window_size"], self.audio_conf["window_stride"]
         )
-        self.apply_spec_augment = apply_spec_augment
-        self.apply_noise_augment = apply_noise_augment
-        self.apply_time_stretch_augment = apply_time_stretch_augment
-        if self.apply_spec_augment: # TODO: continue https://github.com/openspeech-team/openspeech/blob/main/openspeech/data/audio/dataset.py
-            self._spec_augment = SpecAugment(
-                freq_mask_para=self.augment_conf['freq_mask_para'],
-                freq_mask_num=self.augment_conf['freq_mask_num'],
-                time_mask_num=self.augment_conf['time_mask_num'],
-            )
+        self.apply_spec_augment = self.augment_conf['apply_spec_augment']
+        self.apply_noise_augment = self.augment_conf['apply_noise_augment']
+        self.apply_time_stretch_augment = self.augment_conf['apply_time_stretch_augment']
+
+        if self.mode!= 'train' or not any([self.apply_noise_augment, self.apply_spec_augment, self.apply_time_stretch_augment]):
             for idx in range(self.size):
                 self.audio_paths.append(self.audio_paths[idx])
                 self.transcripts.append(self.transcripts[idx])
-                self.augments.append(self.SPEC_AUGMENT)                
-        self.mode = mode
+                self.augments.append(self.NONE_AUGMENT) 
+        else:
+            if self.apply_spec_augment:
+                self._spec_augment = SpecAugment(
+                    freq_mask_para=self.augment_conf['freq_mask_para'],
+                    freq_mask_num=self.augment_conf['freq_mask_num'],
+                    time_mask_num=self.augment_conf['time_mask_num'],
+                )
+                for idx in range(self.size):
+                    self.audio_paths.append(self.audio_paths[idx])
+                    self.transcripts.append(self.transcripts[idx])
+                    self.augments.append(self.SPEC_AUGMENT)  
+
+            
+            if self.apply_noise_augment:
+                if Path(self.augment_conf['noise_dataset_dir']).is_dir():
+                    raise ValueError("Directory doesn't exist %s"%self.augment_conf['noise_dataset_dir'])
+
+                self._noise_injector = NoiseInjector(
+                    noise_dataset_dir=self.augment_conf['noise_dataset_dir'],
+                    sample_rate=self.augment_conf['noise_sample_rate'],
+                    noise_level=self.augment_conf['noise_level'],
+                )
+                for idx in range(self.size):
+                    self.audio_paths.append(self.audio_paths[idx])
+                    self.transcripts.append(self.transcripts[idx])
+                    self.augments.append(self.NONE_AUGMENT)   
+
+            if self.apply_time_stretch_augment:
+                self._time_stretch_augment = TimeStretchAugment(
+                    min_rate=self.augment_conf['time_stretch_min_rate'],
+                    max_rate=self.augment_conf['time_stretch_max_rate'],
+                )
+                for idx in range(self.size):
+                    self.audio_paths.append(self.audio_paths[idx])
+                    self.transcripts.append(self.transcripts[idx])
+                    self.augments.append(self.TIME_STRETCH)
+
+        self.total_size = len(self.audio_paths)
+        
 
     def __getitem__(self, index):
-        wav_name = self.data_list[index]['wav']
+        wav_name = self.audio_paths[index]
         # print("wav: " , wav_name) # 41_0607_213_1_08139_05.wav
         audio_path = os.path.join(self.dataset_path, wav_name)
         # print("audio_path: ", audio_path): data/wavs_train/41_0607_213_1_08139_05.wav
-        transcript = self.data_list[index]['text']
+        transcript = self.transcripts[index]
         # print("text: ", transcript): 예약 받나요?
 
-        spect = self.parse_audio(audio_path)
+        spect = self._parse_audio(audio_path,self.augments[index])
         # print("spect: ", spect.size()) #
         transcript = self.parse_transcript(transcript)
         # print("text: ", transcript) #
         return spect, transcript
 
-    def parse_audio(self, audio_path):
+    def _parse_audio(self, audio_path, augment):
         signal = load_audio(
             audio_path, sample_rate=self.audio_conf['sample_rate'])
 
-        # feature = self.transforms(signal)
+        if augment == self.TIME_STRETCH:
+            signal = self._time_stretch_augment(signal)
 
-        n_fft = int(self.audio_conf['sample_rate']
-                    * self.audio_conf['window_size'])
-        window_size = n_fft
-        stride_size = int(
-            self.audio_conf['sample_rate'] * self.audio_conf['window_stride'])
-        D = librosa.stft(signal, n_fft=n_fft, hop_length=stride_size, win_length=window_size,
-                         window=scipy.signal.windows.hamming)
-        spect, phase = librosa.magphase(D)
-        feature = np.log1p(spect)
+        if augment == self.NOISE_AUGMENT:
+            signal = self._noise_injector(signal)
+        
+        feature = self.transforms(signal)
 
         # normalize
         feature -= feature.mean()
@@ -129,21 +153,16 @@ class MelFilterBankDataset(Dataset):
 
         feature = torch.FloatTensor(feature).transpose(0, 1)
 
-        # todo basic 우선 먼저 확인
-        # if self.mode == 'train':
-        #    feature = spec_augment(feature)
+        if augment == self.SPEC_AUGMENT:
+            feature = self._spec_augment(feature)
 
         return feature
 
     def parse_transcript(self, transcript):
         # print(list(transcript))
-        # ['아', '기', '랑', ' ', '같', '이', ' ', '갈', '건', '데', '요', ',', ' ', '아', '기', '가', ' ', '먹', '을', ' ', '수', ' ', '있', '는', '것', '도', ' ', '있', '나', '요', '?']
-        # ['매', '장', ' ', '전', '용', ' ', '주', '차', '장', '이', ' ', '있', '나', '요', '?']
-        # ['카', '드', ' ', '할', '인', '은', ' ', '신', '용', '카', '드', '만', ' ', '되', '나', '요', '?']
         # ['미', '리', ' ', '예', '약', '하', '려', '고', ' ', '하', '는', '데', '요', '.']
 
-        transcript = list(
-            filter(None, [self.char2index.get(x) for x in list(transcript)]))
+        transcript = [self.char2index.get(x, self.unk_id) for x in list(transcript)]
         # filter(조건, 순횐 가능한 데이터): char2index 의 key 에 없는 것(None) 다 삭제 해버림
         # print("transcript: ", transcript):[49, 153, 4, 85, 63, 24, 129, 5, 4, 47, 601, 64, 4, 137, 55, 126]
 
@@ -153,4 +172,4 @@ class MelFilterBankDataset(Dataset):
         return transcript
 
     def __len__(self):
-        return self.size  # 59662
+        return self.total_size  # 59662
