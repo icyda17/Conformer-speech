@@ -2,6 +2,7 @@ version_0:
   data:
     train: train
     test: test
+    valid: valid
     labels_path: datasets/kor_syllable.json
     dataset_path: datasets/data_sample
     audio_dir: audio
@@ -47,4 +48,7 @@ version_0:
     half_step_residual: True
     decoder_rnn_type: lstm
     warm_steps: 10000
+    ckpt_dir: saved_models
+    num_epochs: 100
+    max_grad_norm: 400
 
