@@ -5,6 +5,7 @@ from models.module import Linear
 import torch
 from torch import Tensor
 
+
 class Conformer(nn.Module):
     """
     Conformer: Convolution-augmented Transformer for Speech Recognition
@@ -34,6 +35,7 @@ class Conformer(nn.Module):
         - **outputs** (batch, out_channels, time): Tensor produces by conformer.
         - **output_lengths** (batch): list of sequence output lengths
     """
+
     def __init__(
             self,
             num_classes: int,
@@ -159,16 +161,20 @@ class Conformer(nn.Module):
             * predicted_log_probs (torch.FloatTensor): Log probability of model predictions.
         """
         pred_tokens, hidden_state = list(), None
-        decoder_input = encoder_output.new_tensor([[self.decoder.sos_id]], dtype=torch.long)
+        decoder_input = encoder_output.new_tensor(
+            [[self.decoder.sos_id]], dtype=torch.long)
 
         for t in range(max_length):
-            decoder_output, hidden_state = self.decoder(decoder_input, hidden_states=hidden_state)
-            step_output = self.joint(encoder_output[t].view(-1), decoder_output.view(-1))
+            decoder_output, hidden_state = self.decoder(
+                decoder_input, hidden_states=hidden_state)
+            step_output = self.joint(
+                encoder_output[t].view(-1), decoder_output.view(-1))
             step_output = step_output.softmax(dim=0)
             pred_token = step_output.argmax(dim=0)
             pred_token = int(pred_token.item())
             pred_tokens.append(pred_token)
-            decoder_input = step_output.new_tensor([[pred_token]], dtype=torch.long)
+            decoder_input = step_output.new_tensor(
+                [[pred_token]], dtype=torch.long)
 
         return torch.LongTensor(pred_tokens)
 

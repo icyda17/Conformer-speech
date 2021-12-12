@@ -49,7 +49,7 @@ class MelFilterBankDataset(Dataset):
         apply_spec_augment (bool): flag indication whether to apply spec augment or not
         apply_noise_augment (bool): flag indication whether to apply noise augment or not
         apply_time_stretch_augment (bool): flag indication whether to apply time stretch augment or not
-        
+
     """
 
         super(MelFilterBankDataset, self).__init__()
@@ -76,11 +76,11 @@ class MelFilterBankDataset(Dataset):
         self.apply_noise_augment = self.augment_conf['apply_noise_augment']
         self.apply_time_stretch_augment = self.augment_conf['apply_time_stretch_augment']
 
-        if self.mode!= 'train' or not any([self.apply_noise_augment, self.apply_spec_augment, self.apply_time_stretch_augment]):
+        if self.mode != 'train' or not any([self.apply_noise_augment, self.apply_spec_augment, self.apply_time_stretch_augment]):
             for idx in range(self.size):
                 self.audio_paths.append(self.audio_paths[idx])
                 self.transcripts.append(self.transcripts[idx])
-                self.augments.append(self.NONE_AUGMENT) 
+                self.augments.append(self.NONE_AUGMENT)
         else:
             if self.apply_spec_augment:
                 self._spec_augment = SpecAugment(
@@ -91,12 +91,12 @@ class MelFilterBankDataset(Dataset):
                 for idx in range(self.size):
                     self.audio_paths.append(self.audio_paths[idx])
                     self.transcripts.append(self.transcripts[idx])
-                    self.augments.append(self.SPEC_AUGMENT)  
+                    self.augments.append(self.SPEC_AUGMENT)
 
-            
             if self.apply_noise_augment:
                 if Path(self.augment_conf['noise_dataset_dir']).is_dir():
-                    raise ValueError("Directory doesn't exist %s"%self.augment_conf['noise_dataset_dir'])
+                    raise ValueError("Directory doesn't exist %s" %
+                                     self.augment_conf['noise_dataset_dir'])
 
                 self._noise_injector = NoiseInjector(
                     noise_dataset_dir=self.augment_conf['noise_dataset_dir'],
@@ -106,7 +106,7 @@ class MelFilterBankDataset(Dataset):
                 for idx in range(self.size):
                     self.audio_paths.append(self.audio_paths[idx])
                     self.transcripts.append(self.transcripts[idx])
-                    self.augments.append(self.NONE_AUGMENT)   
+                    self.augments.append(self.NONE_AUGMENT)
 
             if self.apply_time_stretch_augment:
                 self._time_stretch_augment = TimeStretchAugment(
@@ -119,7 +119,6 @@ class MelFilterBankDataset(Dataset):
                     self.augments.append(self.TIME_STRETCH)
 
         self.total_size = len(self.audio_paths)
-        
 
     def __getitem__(self, index):
         wav_name = self.audio_paths[index]
@@ -129,7 +128,7 @@ class MelFilterBankDataset(Dataset):
         transcript = self.transcripts[index]
         # print("text: ", transcript): 예약 받나요?
 
-        spect = self._parse_audio(audio_path,self.augments[index])
+        spect = self._parse_audio(audio_path, self.augments[index])
         # print("spect: ", spect.size()) #
         transcript = self.parse_transcript(transcript)
         # print("text: ", transcript) #
@@ -144,7 +143,7 @@ class MelFilterBankDataset(Dataset):
 
         if augment == self.NOISE_AUGMENT:
             signal = self._noise_injector(signal)
-        
+
         feature = self.transforms(signal)
 
         # normalize
@@ -162,7 +161,8 @@ class MelFilterBankDataset(Dataset):
         # print(list(transcript))
         # ['미', '리', ' ', '예', '약', '하', '려', '고', ' ', '하', '는', '데', '요', '.']
 
-        transcript = [self.char2index.get(x, self.unk_id) for x in list(transcript)]
+        transcript = [self.char2index.get(x, self.unk_id)
+                      for x in list(transcript)]
         # filter(조건, 순횐 가능한 데이터): char2index 의 key 에 없는 것(None) 다 삭제 해버림
         # print("transcript: ", transcript):[49, 153, 4, 85, 63, 24, 129, 5, 4, 47, 601, 64, 4, 137, 55, 126]
 
